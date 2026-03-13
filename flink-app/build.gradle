@@ -1,0 +1,157 @@
+plugins {
+    id 'java'
+    id 'application'
+    // shadow plugin to produce fat JARs
+    id 'com.github.johnrengelman.shadow' version '7.1.2'
+}
+
+ext {
+    javaVersion = '11'
+    flinkVersion = '1.20.1'
+    flinkConnectorVersion = '3.4.0-1.20'
+    slf4jVersion = '1.7.36'
+    log4jVersion = '2.17.1'
+    kdaRuntimeVersion = '1.2.0'
+}
+
+// artifact properties
+group = 'com.databricks.benchmark'
+version = '0.1'
+mainClassName = 'com.databricks.benchmark.StreamingJob'
+description = """Flink Benchmark Job"""
+
+sourceCompatibility = javaVersion
+targetCompatibility = javaVersion
+tasks.withType(JavaCompile) {
+    options.encoding = 'UTF-8'
+}
+
+applicationDefaultJvmArgs = ["-Dlog4j.configurationFile=log4j2.properties"]
+
+// declare where to find the dependencies of your project
+repositories {
+    mavenCentral()
+    maven {
+        url "https://maven.delta.io/"
+        content {
+            includeGroup "io.delta"
+        }
+    }
+    maven {
+        url "https://repository.apache.org/content/repositories/snapshots"
+        mavenContent {
+            snapshotsOnly()
+        }
+    }
+}
+
+// NOTE: We cannot use "compileOnly" or "shadow" configurations since then we could not run code
+// in the IDE or with "gradle run". We also cannot exclude transitive dependencies from the
+// shadowJar yet (see https://github.com/johnrengelman/shadow/issues/159).
+// -> Explicitly define the // libraries we want to be included in the "flinkShadowJar" configuration!
+configurations {
+    flinkShadowJar // dependencies which go into the shadowJar
+
+    // always exclude these (also from transitive dependencies) since they are provided by Flink
+    flinkShadowJar.exclude group: 'org.apache.flink', module: 'force-shading'
+    flinkShadowJar.exclude group: 'com.google.code.findbugs', module: 'jsr305'
+    flinkShadowJar.exclude group: 'org.slf4j'
+    flinkShadowJar.exclude group: 'org.apache.logging.log4j'
+}
+
+// declare the dependencies for your production and test code
+dependencies {
+    // --------------------------------------------------------------
+    // Compile-time dependencies that should NOT be part of the
+    // shadow jar and are provided in the lib folder of Flink
+    // --------------------------------------------------------------
+    implementation "org.apache.flink:flink-streaming-java:${flinkVersion}"
+    implementation "org.apache.flink:flink-clients:${flinkVersion}"
+    implementation "com.amazonaws:aws-kinesisanalytics-runtime:${kdaRuntimeVersion}"
+
+    // --------------------------------------------------------------
+    // Dependencies that should be part of the shadow jar, e.g.
+    // connectors. These must be in the flinkShadowJar configuration!
+    // --------------------------------------------------------------
+    flinkShadowJar "org.apache.flink:flink-connector-kafka:${flinkConnectorVersion}"
+
+    // Delta Lake Flink connector
+    flinkShadowJar "io.delta:delta-flink:3.0.0"
+    flinkShadowJar "io.delta:delta-standalone_2.12:3.0.0"
+    // Flink Table API for RowData support
+    flinkShadowJar "org.apache.flink:flink-table-api-java-bridge:${flinkVersion}"
+    flinkShadowJar "org.apache.flink:flink-table-common:${flinkVersion}"
+    flinkShadowJar "org.apache.flink:flink-table:${flinkVersion}"
+    flinkShadowJar "org.apache.flink:flink-table-runtime:${flinkVersion}"
+    flinkShadowJar "org.apache.flink:flink-parquet:${flinkVersion}"
+    flinkShadowJar "org.apache.hadoop:hadoop-common:3.3.6"
+    flinkShadowJar "org.apache.hadoop:hadoop-aws:3.3.6"
+    flinkShadowJar "org.apache.hadoop:hadoop-mapreduce-client-core:3.3.6"
+    flinkShadowJar "org.apache.hadoop:hadoop-mapreduce-client-common:3.3.6"
+    flinkShadowJar "org.apache.hadoop:hadoop-client:3.3.6"
+    flinkShadowJar "org.apache.hadoop:hadoop-mapreduce:3.3.6"
+    flinkShadowJar "com.amazonaws:aws-java-sdk-s3:1.12.261"
+    flinkShadowJar "com.amazonaws:aws-java-sdk-core:1.12.261"
+    flinkShadowJar "org.apache.flink:flink-s3-fs-hadoop:${flinkVersion}"
+    flinkShadowJar "org.apache.flink:flink-connector-files:${flinkVersion}"
+    flinkShadowJar "org.apache.flink:flink-parquet:${flinkVersion}"
+
+    runtimeOnly "org.apache.logging.log4j:log4j-slf4j-impl:${log4jVersion}"
+    runtimeOnly "org.apache.logging.log4j:log4j-api:${log4jVersion}"
+    runtimeOnly "org.apache.logging.log4j:log4j-core:${log4jVersion}"
+
+    // Add test dependencies here.
+    // testCompile "junit:junit:4.12"
+}
+
+// make compileOnly dependencies available for tests:
+sourceSets {
+    main.compileClasspath += configurations.flinkShadowJar
+    main.runtimeClasspath += configurations.flinkShadowJar
+
+    test.compileClasspath += configurations.flinkShadowJar
+    test.runtimeClasspath += configurations.flinkShadowJar
+
+    javadoc.classpath += configurations.flinkShadowJar
+}
+
+run.classpath = sourceSets.main.runtimeClasspath
+
+jar {
+    manifest {
+        attributes 'Built-By': System.getProperty('user.name'),
+                'Build-Jdk': System.getProperty('java.version'),
+                'Main-Class': mainClassName
+
+    }
+}
+
+shadowJar {
+    configurations = [project.configurations.flinkShadowJar]
+    zip64 true
+}
+
+// Separate shadow JARs for each entry point
+task streamingJobJar(type: com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+    group = 'shadow'
+    description = 'Build fat JAR for StreamingJob (Query A/B)'
+    configurations = [project.configurations.flinkShadowJar]
+    from sourceSets.main.output
+    zip64 true
+    archiveClassifier.set('streaming-job')
+    manifest {
+        attributes 'Main-Class': 'com.databricks.benchmark.StreamingJob'
+    }
+}
+
+task streamTableJoinJobJar(type: com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+    group = 'shadow'
+    description = 'Build fat JAR for StreamTableJoinJob (Query C)'
+    configurations = [project.configurations.flinkShadowJar]
+    from sourceSets.main.output
+    zip64 true
+    archiveClassifier.set('stream-table-join-job')
+    manifest {
+        attributes 'Main-Class': 'com.databricks.benchmark.StreamTableJoinJob'
+    }
+}
