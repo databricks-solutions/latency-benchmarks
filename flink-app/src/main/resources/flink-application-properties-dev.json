@@ -1,0 +1,22 @@
+[
+  {
+    "PropertyGroupId": "KAFKA",
+    "PropertyMap": {
+      "brokers": "<your-kafka-bootstrap-servers>",
+      "consumeTopic": "<your-input-topic>",
+      "produceTopic": "<your-output-topic>",
+      "clientId": "test.flink1"
+    }
+  },
+  {
+    "PropertyGroupId": "JOB",
+    "PropertyMap": {
+      "parallelism": "1",
+      "isStateful": "false",
+      "startFromEarliest": "false",
+      "checkpointInterval": "60000",
+      "deltaTablePath": "<your-delta-table-s3-path>",
+      "lookupCardinality": "10000"
+    }
+  }
+]

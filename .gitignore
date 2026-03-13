@@ -1,5 +1,6 @@
-*conf*.json
-.DS_Store
-__pycache__
-.idea/
-.env
+*.class
+*.log
+**/.metals
+.vscode/
+**/target
+**/build
